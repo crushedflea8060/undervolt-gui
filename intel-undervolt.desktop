@@ -4,6 +4,6 @@ Type=Application
 Name=Intel Undervolt
 Comment=Configure and apply CPU undervolting
 Icon=preferences-system
-Exec=sudo env WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 XDG_RUNTIME_DIR=/run/user/1000 /usr/local/bin/undervolt-gui
+Exec=sudo /usr/local/bin/undervolt-gui
 Terminal=true
 Categories=System;Settings;Utility;
