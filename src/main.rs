@@ -1,8 +1,8 @@
 use iced::widget::{button, column, row, slider, text, Column};
 use iced::{Alignment, Element, Length, Sandbox, Settings};
-use std::fs;
+use std::io::Write;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 pub fn main() -> iced::Result {
     IntelUndervoltApp::run(Settings::default())
@@ -73,23 +73,52 @@ impl Sandbox for IntelUndervoltApp {
                     ));
                 }
                 
-                match fs::write(&self.config_path, new_config) {
-                    Ok(_) => self.save_status = String::from("Saved successfully!"),
-                    Err(e) => self.save_status = format!("Error saving: {}", e),
+                // Use `pkexec tee` to safely pipe the new config to the privileged file
+                match Command::new("pkexec")
+                    .arg("tee")
+                    .arg(&self.config_path)
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::null()) // We don't need tee's stdout
+                    .spawn()
+                {
+                    Ok(mut child) => {
+                        if let Some(mut stdin) = child.stdin.take() {
+                            let _ = stdin.write_all(new_config.as_bytes());
+                        }
+                        
+                        match child.wait() {
+                            Ok(status) if status.success() => {
+                                self.save_status = String::from("Saved successfully!");
+                            }
+                            Ok(_) => {
+                                self.save_status = String::from("Authentication cancelled or failed.");
+                            }
+                            Err(e) => {
+                                self.save_status = format!("Error waiting on process: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        self.save_status = format!("Failed to launch pkexec: {}", e);
+                    }
                 }
             }
             Message::ApplyConfig => {
                 self.apply_status = String::from("Applying...");
                 
-                // Execute the `intel-undervolt apply` shell command
-                match Command::new("intel-undervolt").arg("apply").output() {
+                // Execute `pkexec intel-undervolt apply` for graphical sudo prompt
+                match Command::new("pkexec")
+                    .arg("intel-undervolt")
+                    .arg("apply")
+                    .output() 
+                {
                     Ok(output) => {
                         if output.status.success() {
                             self.apply_status = String::from("Applied successfully!");
                         } else {
-                            // Extract stderr if the command failed (e.g., not running as root)
+                            // Extract stderr if the command failed or user cancelled auth
                             let error_msg = String::from_utf8_lossy(&output.stderr);
-                            self.apply_status = format!("Failed: {}", error_msg.trim());
+                            self.apply_status = format!("Failed/Cancelled: {}", error_msg.trim());
                         }
                     }
                     Err(e) => {
@@ -124,7 +153,6 @@ impl Sandbox for IntelUndervoltApp {
             col = col.push(slider_row);
         }
 
-        // Action buttons row
         let action_row = row![
             button(text("Save to Config File"))
                 .padding(10)
@@ -138,7 +166,6 @@ impl Sandbox for IntelUndervoltApp {
 
         col = col.push(action_row);
         
-        // Status readouts
         col = col.push(text(&self.save_status).size(14));
         if !self.apply_status.is_empty() {
             col = col.push(text(&self.apply_status).size(14));
@@ -149,7 +176,21 @@ impl Sandbox for IntelUndervoltApp {
 }
 
 fn parse_config<P: AsRef<Path>>(path: P) -> Result<Vec<VoltageEntry>, std::io::Error> {
-    let content = fs::read_to_string(path)?;
+    // Read the file securely using `pkexec cat`
+    let output = Command::new("pkexec")
+        .arg("cat")
+        .arg(path.as_ref().as_os_str())
+        .output()?;
+
+    if !output.status.success() {
+        let err_msg = String::from_utf8_lossy(&output.stderr);
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("Authentication required or failed: {}", err_msg.trim())
+        ));
+    }
+
+    let content = String::from_utf8_lossy(&output.stdout);
     let mut entries = Vec::new();
 
     for line in content.lines() {
