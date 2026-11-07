@@ -1,9 +1,0 @@
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=Intel Undervolt
-Comment=Configure and apply CPU undervolting
-Exec=pkexec /usr/local/bin/undervolt_gui
-Icon=preferences-system
-Terminal=false
-Categories=System;Settings;Utility;
