@@ -2,5 +2,5 @@
 #!/bin/bash
 
 cargo build --release
-sudo mv target/release/undervolt-gui /usr/local/bin/
-sudo mv *.desktop /usr/share/applications/
+sudo cp target/release/undervolt-gui /usr/local/bin/
+sudo cp *.desktop /usr/share/applications/
